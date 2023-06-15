@@ -1,0 +1,85 @@
+version: "3.5"
+services:
+  mongo:
+    container_name: mongo
+    image: mongo:4.4
+    command: --nojournal
+    networks:
+      - fiwareIngestion
+    ports:
+      - "27018:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+    healthcheck:
+      test: |
+        host=`hostname --ip-address || echo '127.0.0.1'`; 
+        mongo --quiet $host/test --eval 'quit(db.runCommand({ ping: 1 }).ok ? 0 : 2)' && echo 0 || echo 1
+
+  orion:
+    image: fiware/orion-ld:1.0.1
+    container_name: orion
+    depends_on:
+      - mongo
+    command: -dbhost mongo -dbuser root -dbpwd example #-logLevel DEBUG
+    ports:
+      - "1027:1026"
+    environment:
+      ORIONLD_MONGO_USER: root
+      ORIONLD_MONGO_PASSWORD: example
+    networks:
+      - fiwareIngestion
+    healthcheck:
+      test: curl --fail -s http://orion:1026/version || exit 1
+
+  server:
+    container_name: server
+    build:
+      context: ./server
+    ports:
+      - "3001:3001"
+    depends_on:
+      - orion
+    networks:
+      - fiwareIngestion
+    command: "npm start"    
+    environment:
+      - URL_DRACO=http://draco:5050
+      - URL_CB=http://orion:1026
+      - MONGO_URI=mongodb://root:example@mongo:27017/sth_test?authSource=admin
+
+  draco:
+    image: ging/fiware-draco:2.1.0
+    container_name: draco
+    ports:
+      - "9090:9090"
+      - "5050:5050"
+      - "5051:5051"
+    environment:
+      NIFI_WEB_HTTP_PORT: 9090
+    networks:
+      - fiwareIngestion
+    volumes: 
+      - ./draco/templates:/opt/nifi/nifi-current/conf/templates
+    healthcheck:
+      test: curl --fail -s -k https://draco:9090/nifi-api/system-diagnostics || exit 1
+      start_period: 1m
+
+  mongoHistorical:
+    container_name: mongoHistorical
+    image: mongo:4.4
+    command: --nojournal
+    networks:
+      - fiwareIngestion
+    ports:
+      - "27019:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+    healthcheck:
+      test: |
+        host=`hostname --ip-address || echo '127.0.0.1'`; 
+        mongo --quiet $host/test --eval 'quit(db.runCommand({ ping: 1 }).ok ? 0 : 2)' && echo 0 || echo 1
+
+networks:
+  fiwareIngestion:
